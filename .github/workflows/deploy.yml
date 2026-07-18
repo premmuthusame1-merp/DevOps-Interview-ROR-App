@@ -1,0 +1,72 @@
+name: Build and Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-2
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images to ECR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ECR repository URLs
+        id: ecr-urls
+        run: |
+          RAILS_APP_REPO=$(aws ecr describe-repositories --repository-names ror-app-rails-app --query 'repositories[0].repositoryUri' --output text)
+          NGINX_REPO=$(aws ecr describe-repositories --repository-names ror-app-nginx --query 'repositories[0].repositoryUri' --output text)
+          echo "rails_app_repo=$RAILS_APP_REPO" >> $GITHUB_OUTPUT
+          echo "nginx_repo=$NGINX_REPO" >> $GITHUB_OUTPUT
+
+      - name: Build, tag, and push Rails app image to ECR
+        id: build-rails-app
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ steps.ecr-urls.outputs.rails_app_repo }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -f docker/app/Dockerfile -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest .
+          docker push $ECR_REPOSITORY --all-tags
+          echo "image=$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Build, tag, and push Nginx image to ECR
+        id: build-nginx
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ steps.ecr-urls.outputs.nginx_repo }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Use ECS-specific nginx config that points to localhost:3000
+          cp docker/nginx/ecs-default.conf docker/nginx/default.conf
+          docker build -f docker/nginx/Dockerfile -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest .
+          docker push $ECR_REPOSITORY --all-tags
+          echo "image=$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Force ECS service update
+        id: update-ecs
+        run: |
+          aws ecs update-service \
+            --cluster ror-app-production-cluster \
+            --service ror-app-production-service \
+            --force-new-deployment
