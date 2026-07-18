@@ -46,6 +46,8 @@ jobs:
           ECR_REPOSITORY: ${{ steps.ecr-urls.outputs.rails_app_repo }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          # Use ECS-specific entrypoint with db:prepare instead of db:schema:load
+          cp docker/app/entrypoint-ecs.sh docker/app/entrypoint.sh
           docker build -f docker/app/Dockerfile -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest .
           docker push $ECR_REPOSITORY --all-tags
           echo "image=$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT

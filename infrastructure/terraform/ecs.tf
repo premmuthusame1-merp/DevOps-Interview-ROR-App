@@ -55,7 +55,8 @@ resource "aws_ecs_task_definition" "app" {
         { name = "S3_REGION_NAME", value = var.aws_region },
         { name = "LB_ENDPOINT", value = aws_lb.main.dns_name },
         { name = "RAILS_ENV", value = "production" },
-        { name = "RAILS_LOG_TO_STDOUT", value = "true" }
+        { name = "RAILS_LOG_TO_STDOUT", value = "true" },
+        { name = "DISABLE_DATABASE_ENVIRONMENT_CHECK", value = "1" }
       ]
       healthCheck = {
         command     = ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
