@@ -1,93 +1,135 @@
-Application Deployment Report
+# Deployment Report
 
-Prepared by:
-premmuthusame
-Date:
-July 20, 2026
-Repository:
-https://github.com/premmuthusame1-merp/DevOps-Interview-ROR-App
-Infrastructure Code:
-Terraform (us-east-2)
+## Project: Ruby on Rails Web Application on AWS ECS Fargate
 
+### Prepared by: premmuthusame-merp
+### Date: July 18, 2026
+### Repository: https://github.com/premmuthusame1-merp/DevOps-Interview-ROR-App
+### IaC Tool: Terraform
+### AWS Region: us-east-2
 
-1. Architecture Overview
-The deployed infrastructure runs a containerized Ruby on Rails 7.0.5 application connected to a PostgreSQL 18.3 database and Amazon S3 for file storage. The compute layer utilizes AWS ECS Fargate, providing a serverless container environment that scales without the need to manage underlying EC2 instances. Public-facing Ib traffic is routed through an Application Load Balancer (ALB), which balances the load across Fargate tasks distributed across private subnets for high availability.
+---
 
+## Table of Contents
 
-FYI  : PostgreSQL 13 reached End of Life (EOL) in November 2025
-Key Design Decisions & Rationale
-Decision
-Rationale
-AWS ECS Fargate
-Here I working on simple application so i have used ECS over EKS.
-Terraform for IaC
-For managing and Provision infra i have used Terraform as IAC
-Dual Containers per Task
-Runs Nginx and Rails within the same task definition, mirroring local development configurations through shared localhost networking on port 3000.
-NAT Gateway Integration
-Placed a NAT Gateway in the public subnet to allow Fargate tasks in private subnets to pull images from ECR and fetch packages from the internet during runtime.
-PostgreSQL 18.3 Engine
-PostgreSQL 13 reached End of Life (EOL) in November 2025. Version 18.3 was selected as the latest stable version supported in the us-east-2 region.
+1. [Architecture Overview](#1-architecture-overview)
+2. [Infrastructure Components](#2-infrastructure-components)
+3. [Architecture Diagram](#3-architecture-diagram)
+4. [Deployment Steps (End-to-End)](#4-deployment-steps-end-to-end)
+5. [Configuration Details](#5-configuration-details)
+6. [Environment Variables](#6-environment-variables)
+7. [Security Best Practices Implemented](#7-security-best-practices-implemented)
+8. [CI/CD Pipeline](#8-cicd-pipeline)
+9. [Troubleshooting & Issues Resolved](#9-troubleshooting--issues-resolved)
+10. [How to Access the Application](#10-how-to-access-the-application)
+11. [Cost Breakdown](#11-cost-breakdown)
+12. [Clean Up](#12-clean-up)
 
-2. Infrastructure Components
-2.1 VPC and Networking
-The network architecture is built within a dedicated VPC using the 10.0.0.0/16 CIDR block. To ensure high availability, the infrastructure is distributed across two Availability Zones (AZs) in us-east-2:
-Public Subnets: 10.0.1.0/24 (us-east-2a) and 10.0.2.0/24 (us-east-2b) host the Application Load Balancer and the NAT Gateway. These subnets are attached directly to the Internet Gateway.
-Private Subnets: 10.0.10.0/24 (us-east-2a) and 10.0.20.0/24 (us-east-2b) host the ECS Fargate tasks and the RDS PostgreSQL instance. Outbound internet traffic goes through the NAT Gateway.
-Internet Gateway: Attached to the VPC to enable internet access for public subnets.
-NAT Gateway: A single NAT Gateway is deployed in public subnet A and associated with an Elastic IP. This allows resmyces in the private subnets to pull container images from ECR and execute dependencies installer scripts.
-2.2 Security Groups
-To implement the principle of least privilege, access betIen different components is locked down at the network level:
-Security Group
-Inbound Rule
-Outbound Rule
+---
 
+## 1. Architecture Overview
 
-alb-sg
-HTTP (port 80) from 0.0.0.0/0
-All Traffic (0.0.0.0/0)
-Allows user HTTP traffic to reach the ALB.
-ecs-sg
-HTTP (port 80) from alb-sg only
-All Traffic (0.0.0.0/0)
-Restricts task access so that only the ALB can route traffic to Nginx on port 80.
-rds-sg
-PostgreSQL (port 5432) from ecs-sg only
-All Traffic (0.0.0.0/0)
-Secures database access so that only ECS Fargate tasks can query the PostgreSQL instance.
+The application is a **Ruby on Rails 7.0.5** web application with **PostgreSQL 18.3** database and **S3** file storage, containerized with Docker and deployed on **AWS ECS Fargate** (serverless containers). An **Application Load Balancer** distributes incoming traffic across multiple ECS tasks running in private subnets.
 
-2.3 IAM Roles & Custom Policies
-I configured two distinct IAM roles to control container execution and resmyce access:
-ecs_task_execution_role: Uses the AWS-managed AmazonECSTaskExecutionRolePolicy. This allows the ECS container agent to authenticate with ECR, pull the application images, and write logs to CloudWatch.
-ecs_task_role: Assigned to the running Rails application container. It uses a custom policy that allows GetObject, PutObject, DeleteObject, and ListBucket actions on S3. 
-2.4 Amazon ECR Repositories
-Two container repositories Ire created in Elastic Container Registry (ECR). Both repositories are mutable to allow tag overwrites and vulnerability scanning is enabled.
-2.5 RDS PostgreSQL Database
-I deployed a secure, managed database instance inside my private subnets:
-Engine: PostgreSQL 18.3 (PostgreSQL 13 reached EOL)
-Instance Class: db.t3.micro (2 vCPUs, 1GB RAM) — I have used free tier.
-Storage: 20GB gp2 (General Purpose SSD), encrypted at rest.
-I keep Database Name as rails 
-Backup Strategy: 7-day automated backup retention.
-Configuration: Public accessibility is set to False, and deletion protection is disabled for testing convenience.
-2.6 Amazon S3 Storage
-An S3 bucket is provisioned for application asset uploads and data storage:
-Bucket Name: ror-app-production
-Encryption: AES256 server-side encryption enabled.
-Security: All public access block settings are enabled. Only via ECS task role not using static keys
-2.7 Application Load Balancer
-Listener: Port 80 (HTTP).
-Target Group has configured.
-Health Check: Sends HTTP GET requests to '/' every 30 seconds. Healthy threshold is set to 2, and unhealthy threshold is set to 3.
-Subnet: public subnets in both Availability Zones (us-east-2a and us-east-2b).
-2.8 ECS Fargate Cluster & Service
-The application runs on ECS Fargate tasks:
-I have given Cluster Name as  ror-app-production-cluster
-Compute Allocation as 512 CPU units (0.5 vCPU) and 1024 MB (1 GB) memory per task.
-Scaling Desired count is set to 2 tasks for high availability across the private subnets.
-Container Setup for Nginx (port 80) and rails_app (port 3000) run together in a single task definition.
-Security: The service runs in private subnets with no public IPs assigned, relying on the ALB for incoming traffic.
-3. System Architecture Diagram
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **ECS Fargate** over EKS | No cluster nodes to manage, no Kubernetes complexity, fits the scale of a Rails app |
+| **Terraform** over CDK/CloudFormation | Cloud-agnostic, declarative HCL syntax, mature provider ecosystem |
+| **Two containers per task** (nginx + rails) | Same pattern as local docker-compose; shared localhost networking |
+| **NAT Gateway** over VPC Endpoints | Simpler setup for initial deployment; ECR pull requires internet access from private subnets |
+| **PostgreSQL 18.3** (instead of 13.3) | PostgreSQL 13 reached EOL in Nov 2025; 18.3 is the latest available in us-east-2 |
+
+---
+
+## 2. Infrastructure Components
+
+### 2.1 Network (VPC)
+
+- **VPC CIDR**: `10.0.0.0/16` (65,536 IPs)
+- **Public Subnets**: `10.0.1.0/24` (us-east-2a), `10.0.2.0/24` (us-east-2b)
+  - Host the **ALB** and **NAT Gateway**
+  - Have direct internet access via Internet Gateway
+- **Private Subnets**: `10.0.10.0/24` (us-east-2a), `10.0.20.0/24` (us-east-2b)
+  - Host **ECS Fargate tasks** and **RDS PostgreSQL**
+  - No direct internet access; outbound traffic goes through NAT Gateway
+- **Internet Gateway**: Attached to VPC for public subnet internet access
+- **NAT Gateway**: One NAT Gateway in public subnet A with an Elastic IP
+  - Allows private subnets to pull Docker images from ECR and install packages
+  - Cost: ~$35/month (including Elastic IP)
+
+### 2.2 Security Groups
+
+| Security Group | Inbound Rule | Outbound | Purpose |
+|---------------|-------------|----------|---------|
+| `alb-sg` | HTTP:80 from 0.0.0.0/0 | All traffic | Allows internet users to reach the ALB |
+| `ecs-sg` | HTTP:80 from `alb-sg` only | All traffic | Only ALB can reach ECS tasks (port 80 → nginx) |
+| `rds-sg` | PostgreSQL:5432 from `ecs-sg` only | All traffic | Only ECS tasks can reach the database |
+
+**Security Principle**: Least privilege — each layer only allows traffic from the layer before it. No component is directly exposed to the internet except the ALB.
+
+### 2.3 IAM Roles & Policies
+
+| Role | Attached Policy | Used By |
+|------|----------------|---------|
+| `ecs_task_execution_role` | `AmazonECSTaskExecutionRolePolicy` (AWS-managed) | ECS agent to pull images from ECR and send logs to CloudWatch |
+| `ecs_task_role` | Custom `s3_access_policy` (S3 Get/Put/Delete/ListBucket) | Application code running inside the container to access S3 |
+
+**Critical**: S3 access uses **IAM role authentication**, not AccessKey/SecretKey. The AWS SDK in the Rails app automatically fetches temporary credentials from the ECS task metadata endpoint (`169.254.170.2`).
+
+### 2.4 ECR Repositories
+
+| Repository | Image | URL |
+|------------|-------|-----|
+| `ror-app-rails-app` | Rails app (Puma on port 3000) | `986281581674.dkr.ecr.us-east-2.amazonaws.com/ror-app-rails-app` |
+| `ror-app-nginx` | Nginx reverse proxy (port 80) | `986281581674.dkr.ecr.us-east-2.amazonaws.com/ror-app-nginx` |
+
+- Image tag mutability: MUTABLE (allows `latest` tag updates)
+- Vulnerability scanning: Enabled (scan on push)
+
+### 2.5 RDS PostgreSQL
+
+- **Engine**: PostgreSQL 18.3
+- **Instance class**: `db.t3.micro` (2 vCPU, 1GB RAM — free tier eligible)
+- **Storage**: 20GB gp2 (general purpose SSD), encrypted at rest
+- **Database name**: `rails`
+- **Backup retention**: 7 days
+- **Maintenance window**: Sunday 4-5 AM UTC
+- **Deletion protection**: Disabled (for easy cleanup)
+- **Public accessibility**: False (in private subnets)
+
+### 2.6 S3 Bucket
+
+- **Name**: `ror-app-production-986281581674`
+- **Public access**: Blocked at all levels (ACLs, bucket policies)
+- **Server-side encryption**: AES256 enabled
+- **Access**: Only via the ECS task IAM role (no static keys)
+
+### 2.7 Application Load Balancer
+
+- **Type**: Application Load Balancer (Layer 7)
+- **Scheme**: Internet-facing
+- **Listener**: HTTP:80
+- **Target group**: HTTP:80, IP target type (for Fargate)
+- **Health check**: HTTP GET `/` every 30 seconds, threshold: 2 healthy / 3 unhealthy
+- **Subnets**: Both public subnets (us-east-2a, us-east-2b)
+
+### 2.8 ECS Fargate
+
+- **Cluster**: `ror-app-production-cluster`
+- **Launch type**: Fargate (serverless)
+- **Task CPU**: 512 units (0.5 vCPU)
+- **Task memory**: 1024 MB (1 GB)
+- **Desired count**: 2 tasks (high availability across 2 AZs)
+- **Task definition**: 2 containers — `rails_app` (port 3000) and `nginx` (port 80)
+- **Service**: Attached to ALB target group, in private subnets, no public IP
+
+---
+
+## 3. Architecture Diagram
+
+```
                           ┌──────────────────────────────────────────────────────┐
                           │                   AWS Cloud (us-east-2)               │
                           │                                                       │
@@ -132,84 +174,192 @@ Security: The service runs in private subnets with no public IPs assigned, relyi
                           │  │  └─────────────────────────────────────────┘  │  │
                           │  │                                                 │  │
                           │  │  ┌─────────────────────────────────────────┐  │  │
-                          │  │  │    S3 Bucket (Global Resmyce)          │  │  │
+                          │  │  │    S3 Bucket (Global Resource)          │  │  │
                           │  │  │    ror-app-production-986281581674      │  │  │
                           │  │  │    Block Public Access / AES256 Encrypt │  │  │
                           │  │  └─────────────────────────────────────────┘  │  │
                           │  └─────────────────────────────────────────────────┘  │
                           └──────────────────────────────────────────────────────┘
+```
 
+### Data Flow
 
-Data Flow Architecture
-Step 1: The user accesses the application by navigating to the ALB DNS name (HTTP port 80).
-Step 2: The ALB forwards the incoming request to the Nginx container (port 80) inside one of the Fargate tasks.
-Step 3: Nginx acts as a reverse proxy and passes the request to the Rails container ( running on port 3000) over localhost networking.
-Step 4: The Rails app connects to the PostgreSQL database (RDS) to fetch or persist data.
-Step 5: Active storage uploads or asset accesses are handled directly through the S3 bucket using IAM role temporary credentials.
-Step 6: Standard out and standard error logs from both Nginx and Rails application will pushed directly to Amazon CloudWatch.
-4. End-to-End Deployment Workflow
-Phase 1: Forking & Cloning the Repository
-I forked the original repository from 'mallowtechdev' on GitHub to create my working repository at https://github.com/premmuthusame1-merp/DevOps-Interview-ROR-App. Next, I cloned it to my local environment:
+```
+Step 1: User → http://alb-dns-name
+Step 2: ALB → forwards to nginx:80 in one of the ECS tasks
+Step 3: nginx → proxies to rails_app:3000 on localhost
+Step 4: rails_app → queries RDS PostgreSQL (via env vars) for data
+Step 5: rails_app → reads/writes S3 bucket (via IAM task role, no keys)
+Step 6: All logs → stream to CloudWatch Logs groups
+```
+
+---
+
+## 4. Deployment Steps (End-to-End)
+
+### Phase 1: Fork & Prepare Repository
+
+```bash
+# Fork the original repo on GitHub (web UI)
+# Source: https://github.com/mallowtechdev/DevOps-Interview-ROR-App
+# Destination: https://github.com/premmuthusame1-merp/DevOps-Interview-ROR-App
+
+# Clone the fork locally
 git clone https://github.com/premmuthusame1-merp/DevOps-Interview-ROR-App.git
 cd DevOps-Interview-ROR-App
+```
 
-Phase 2: Creating Infrastructure-as-Code Files
-I wrote and structured my Terraform codebase in a new 'infrastructure/' folder:
-provider.tf: Configures the AWS provider targeting the us-east-2 region.
-variables.tf: Declares customizable variables with safe defaults.
-outputs.tf: Exposes endpoints (ALB DNS, ECR URLs, RDS host, S3 bucket name) for other pipelines and commands.
-vpc.tf: Configures the VPC, public/private subnets, IGW, NAT Gateway, EIP, and route tables.
-security_groups.tf: Defines strict traffic rules for the ALB, containers, and RDS.
-iam.tf: Sets up execution and task roles, along with the custom S3 policy.
-ecr.tf: Provisions the ECR repositories with scanning on push enabled.
-rds.tf: Creates the PostgreSQL 18.3 database and its subnet configuration.
-s3.tf: Sets up the secure S3 storage bucket and blocks all public access.
-alb.tf: Builds the ALB, listener, and target group.
-ecs.tf: Sets up the Fargate cluster, task definitions (including both containers), Fargate service, and CloudWatch log groups.
-I also created the configuration files:
-.github/workflows/deploy.yml: Configures the GitHub Actions CI/CD pipeline.
-docker/nginx/ecs-default.conf: Configures Nginx to route traffic to localhost:3000 inside the Fargate task.
-docker/app/entrypoint-ecs.sh: Contains the startup script using db:prepare to safely initialize the database instead of db:schema:load because it make create new DB each time when container updates
-Phase 3: Configuring Local Variables
-I created a 'terraform.tfvars' file within the 'infrastructure/terraform/' directory to declare local deployment settings:
+### Phase 2: Create Infrastructure Code
+
+Created the following files under the `infrastructure/` directory:
+
+```
+infrastructure/
+├── terraform/
+│   ├── provider.tf          # AWS provider config (region: us-east-2)
+│   ├── variables.tf          # All input variables with defaults
+│   ├── outputs.tf            # Key outputs (ALB DNS, ECR URLs, etc.)
+│   ├── vpc.tf                # VPC, subnets, IGW, NAT Gateway, route tables
+│   ├── security_groups.tf    # ALB, ECS, RDS security groups (least privilege)
+│   ├── iam.tf                # IAM roles (execution + task) + S3 policy
+│   ├── ecr.tf                # ECR repositories for rails_app and nginx
+│   ├── rds.tf                # RDS PostgreSQL 18.3 with subnet group
+│   ├── s3.tf                 # S3 bucket with encryption + public access block
+│   ├── alb.tf                # ALB + target group + HTTP listener
+│   ├── ecs.tf                # ECS cluster + task definition + service + log groups
+│   ├── terraform.tfvars.example
+│   └── .gitignore
+├── diagrams/
+│   └── architecture.md      # Mermaid architecture diagram
+└── README.md                 # Deployment instructions
+```
+
+Additionally created:
+- `.github/workflows/deploy.yml` — CI/CD pipeline (GitHub Actions)
+- `docker/nginx/ecs-default.conf` — ECS-specific nginx config (uses `localhost:3000`)
+- `docker/app/entrypoint-ecs.sh` — ECS-safe entrypoint (uses `db:prepare` instead of `db:schema:load`)
+
+### Phase 3: Configure Terraform Variables
+
+```bash
+cd infrastructure/terraform
+edited | terraform.tfvars
+```
+
+Set values in `terraform.tfvars`:
+```hcl
 aws_region      = "us-east-2"
 environment     = "production"
 project_name    = "ror-app"
-rds_password    = "****" (I have set on my own while working)
+rds_password    = "****" (password)
 rds_username    = "postgres"
-rds_db_name     = "****" (I have set on my own while working)
+rds_db_name     = "****" (username)
+```
 
-Note: The 'terraform.tfvars' file was added to '.gitignore' to prevent credentials from being committed to the repository while pushing to Git.
-Phase 4: Running Terraform to Deploy 
-I initialized the directory to download the AWS provider plugins (v5.100.0):
+**Important**: `terraform.tfvars` was added to `.gitignore` to prevent committing secrets.
+
+### Phase 4: Deploy Infrastructure with Terraform
+
+```bash
 terraform init
+```
 
-I then deployed the infrastructure:
-terraform apply
+Output:
+```
+Initializing the backend...
+Initializing provider plugins...
+- Finding hashicorp/aws versions matching "~> 5.0"...
+- Installing hashicorp/aws v5.100.0...
+Terraform has been successfully initialized!
+```
 
-This execution successfully provisioned including the VPC, security groups, IAM execution/task roles, ECR repositories, S3 bucket, RDS instance, ALB, and the ECS Fargate cluster/service. 
-Phase 5: Configuring GitHub Repository Secrets
-In the GitHub repository settings, I configured two actions secrets to authorize my deployment workflow:
-AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY
-Phase 6: Triggering the CI/CD Pipeline
-I committed and pushed my files to the main branch to start the build pipeline:
+```bash
+terraform apply 
+```
+
+**Resources Created (39 total):**
+
+| Category | Resource | Count |
+|----------|----------|-------|
+| Network | VPC, subnets (4), IGW, NAT Gateway, EIP, route tables (2), route table associations (4) | 13 |
+| Security | Security Groups (3) | 3 |
+| IAM | Roles (2), Policy (1), Policy attachments (2) | 5 |
+| Storage | ECR repos (2), S3 bucket + public access block + encryption | 5 |
+| Database | RDS instance, subnet group, parameter group | 3 |
+| Compute | ECS cluster, capacity providers, task definition, service | 4 |
+| Load Balancer | ALB, target group, listener | 3 |
+| Monitoring | CloudWatch Log Groups (2) | 2 |
+| Data Sources | Caller identity, engine version | 2 |
+| **Total** | | **39** |
+
+**Terraform Outputs:**
+```
+alb_dns_name      = "ror-app-production-alb-1408939335.us-east-2.elb.amazonaws.com"
+ecr_rails_app_url = "986281581674.dkr.ecr.us-east-2.amazonaws.com/ror-app-rails-app"
+ecr_nginx_url     = "986281581674.dkr.ecr.us-east-2.amazonaws.com/ror-app-nginx"
+ecs_cluster_name  = "ror-app-production-cluster"
+ecs_service_name  = "ror-app-production-service"
+rds_endpoint      = "ror-app-production-db.cpqci8g40v6k.us-east-2.rds.amazonaws.com:5432"
+rds_hostname      = "ror-app-production-db.cpqci8g40v6k.us-east-2.rds.amazonaws.com"
+s3_bucket_name    = "ror-app-production-986281581674"
+```
+
+### Phase 5: Configure GitHub Secrets
+
+Added these secrets in the GitHub repository (Settings → Secrets and variables → Actions):
+
+| Secret Name | Value |
+|-------------|-------|
+| `AWS_ACCESS_KEY_ID` | `` |
+| `AWS_SECRET_ACCESS_KEY`  |
+
+These allow the CI/CD pipeline to authenticate with AWS and push Docker images to ECR.
+
+### Phase 6: Push Code to Trigger CI/CD
+
+```bash
 git add .
 git commit -m "Add Terraform IaC, CI/CD pipeline, and infrastructure code"
 git push origin main
+```
 
-This triggered my GitHub Actions workflow, which built both the Rails and Nginx Docker images (incorporating the ECS-specific configuration files), pushed them to the ECR repositories under the 'latest', and triggered a rolling deployment on my ECS service.
-Phase 7: Verifying the Application Status
-Once the pipeline completed, I checked the status of my Fargate tasks and load balancer target group health:
-What i have runned in shell to check the status
+**GitHub Actions Workflow (`.github/workflows/deploy.yml`):**
+
+| Step | Action | Description |
+|------|--------|-------------|
+| 1 | Checkout code | Clones the repository |
+| 2 | Configure AWS credentials | Uses GitHub Secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` |
+| 3 | Login to ECR | `aws ecr get-login-password` to authenticate Docker with ECR |
+| 4 | Build Rails image | `docker build -f docker/app/Dockerfile`, copies ECS entrypoint first |
+| 5 | Build Nginx image | Copies `ecs-default.conf` over `default.conf`, then builds |
+| 6 | Push to ECR | Tags with commit SHA + `latest`, pushes both images |
+| 7 | Force ECS deployment | `aws ecs update-service --force-new-deployment` |
+
+### Phase 7: Verify Application
+
+```bash
+# Check ECS service status
 aws ecs describe-services --cluster ror-app-production-cluster --service ror-app-production-service
-aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:us-east-2:986281581674:targetgroup/ror-app-production-tg/c5fab45ea9ae470e
 
-The application was confirmed running and accessible publicly at the ALB endpoint: http://ror-app-production-alb-1408939335.us-east-2.elb.amazonaws.com
-5. Configuration Details
-5.1 ECS Container Definitions
-The ECS Task Definition contains two container definitions running within the Fargate task:
-Rails App Container
+# Check ALB target health
+aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:us-east-2:986281581674:targetgroup/ror-app-production-tg/c5fab45ea9ae470e
+```
+
+Access the application at: `http://ror-app-production-alb-1408939335.us-east-2.elb.amazonaws.com`
+
+### Phase 8: Submit Deliverables
+
+1. Repository shared with **mallowtechdev** GitHub account
+2. Email sent to **hr@mallow-tech.com** with repository link and branch details
+
+---
+
+## 5. Configuration Details
+
+### 5.1 Task Definition Container Configuration (two taks created in different AZ for high Avaliability)
+
+**rails_app container:** | 
+```json
 {
   "name": "rails_app",
   "image": "986281581674.dkr.ecr.us-east-2.amazonaws.com/ror-app-rails-app:latest",
@@ -230,14 +380,13 @@ Rails App Container
   ],
   "healthCheck": {
     "command": ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"],
-    "interval": 30,
-    "timeout": 5,
-    "retries": 3,
-    "startPeriod": 60
+    "interval": 30, "timeout": 5, "retries": 3, "startPeriod": 60
   }
 }
+```
 
-Nginx Container
+**nginx container:**
+```json
 {
   "name": "nginx",
   "image": "986281581674.dkr.ecr.us-east-2.amazonaws.com/ror-app-nginx:latest",
@@ -245,11 +394,14 @@ Nginx Container
   "portMappings": [{ "containerPort": 80, "hostPort": 80, "protocol": "tcp" }],
   "dependsOn": [{ "containerName": "rails_app", "condition": "HEALTHY" }]
 }
+```
 
-5.2 Nginx Configuration (docker/nginx/ecs-default.conf)
-Since the containers share localhost networking within the Fargate task, Nginx is configured to pass requests to the Rails app on localhost:3000 rather than using container hostname routing:
+### 5.2 Nginx Configuration (ECS-specific)
+
+`docker/nginx/ecs-default.conf`:
+```nginx
 upstream rails_app {
-  server localhost:3000;
+  server localhost:3000;    # Changed from "rails_app:3000" for ECS Fargate
 }
 
 server {
@@ -262,178 +414,301 @@ server {
     proxy_pass http://rails_app;
   }
 }
+```
 
-5.3 Rails Entrypoint (docker/app/entrypoint-ecs.sh)
-I modified the docker entrypoint script to run 'rails db:prepare' instead of 'db:schema:load'. This is an important adjustment for Fargate: 'db:prepare' is idempotent, meaning it will create the database if it does not exist and run pending migrations without wiping existing data. This makes it safe to run during task restarts or rolling updates:
+**Why `localhost:3000`?** In ECS Fargate, containers in the same task definition share the same network namespace (elastic network interface). So inter-container communication uses `localhost`, not Docker Compose service names.
+
+### 5.3 Rails Entrypoint (ECS-specific)
+
+`docker/app/entrypoint-ecs.sh`:
+```bash
 #!/bin/sh
 set -e
 bundle check || bundle install
-bundle exec rails db:prepare
+bundle exec rails db:prepare    # Creates DB if missing, runs pending migrations only
 if [ -f tmp/pids/server.pid ]; then
   rm tmp/pids/server.pid
 fi
 exec "$@"
+```
 
-5.4 Rails Production Config (config/environments/production.rb)
-To allow requests originating from the ALB and the ALB health check, I updated the Rails production host configuration:
+**Why `db:prepare` instead of `db:schema:load`?** The original entrypoint used `db:schema:load` which drops and recreates the database (destructive). `db:prepare` is idempotent — it creates the DB only if needed and runs pending migrations. Safe for container restarts and rolling deployments.
+
+### 5.4 Rails Production Config Modification
+
+`config/environments/production.rb`:
+```ruby
 config.hosts << "#{ENV['LB_ENDPOINT']}"
-config.hosts << /.*/
+config.hosts << /.*/    # Added for health checks and ALB traffic
+```
 
-Adding the wildcard matcher prevents Rails from raising HostAuthorization errors when the ALB health checks the tasks using their private IP addresses.
-6. Environment Variables
-The following environment variables are supplied to the Rails container in the task definition:
-Variable
-Value
+**Why was this needed?** Rails 7's `HostAuthorization` middleware blocks requests that don't match configured hosts. ALB health checks send requests with the ALB's private IP as the Host header, which Rails would reject without the wildcard.
 
+---
 
+## 6. Environment Variables
 
+| Variable | Value | Source | Purpose |
+|----------|-------|--------|---------|
+| `RDS_DB_NAME` | `rails` | Terraform variable | PostgreSQL database name |
+| `RDS_USERNAME` | `postgres` | Terraform variable | Database master username |
+| `RDS_PASSWORD` | `HbtNjE90Brmol3gL` | Terraform variable | Database master password |
+| `RDS_HOSTNAME` | (RDS endpoint) | Terraform resource | Database host for connection |
+| `RDS_PORT` | `5432` | Terraform variable | PostgreSQL port |
+| `S3_BUCKET_NAME` | `ror-app-production-...` | Terraform resource | S3 bucket for file uploads |
+| `S3_REGION_NAME` | `us-east-2` | Terraform variable | AWS region for S3 |
+| `LB_ENDPOINT` | (ALB DNS) | Terraform resource | Load balancer URL (for `config.hosts`) |
+| `RAILS_ENV` | `production` | Hardcoded | Rails environment |
+| `RAILS_LOG_TO_STDOUT` | `true` | Hardcoded | Stream logs to CloudWatch |
+| `DISABLE_DATABASE_ENVIRONMENT_CHECK` | `1` | Hardcoded | Allow DB setup in production |
 
-RDS_DB_NAME
-rails
-Terraform variable
-Specifies the PostgreSQL database name.
-RDS_USERNAME
-****
-Terraform variable
-Specifies the database administrator username.
-RDS_PASSWORD
-****
-Terraform variable
-Specifies the database password.
-RDS_HOSTNAME
-ror-app-production-db.cpqci8g40v6k...
-Terraform resource
-Defines the endpoint address of the RDS database.
-RDS_PORT
-5432
-Terraform variable
-Specifies the PostgreSQL port.
-S3_BUCKET_NAME
-ror-app-production-986281581674
-Terraform resource
-Name of the S3 bucket for uploads.
-S3_REGION_NAME
-us-east-2
-Terraform variable
-AWS region hosting the S3 bucket.
-LB_ENDPOINT
-ror-app-production-alb-1408939335...
-Terraform resource
-The DNS name of the ALB, used for Rails host verification.
-RAILS_ENV
-production
-Hardcoded
-Forces Rails to run in production mode.
-RAILS_LOG_TO_STDOUT
-true
-Hardcoded
-Streams application logs directly to stdout for CloudWatch ingestion.
-DISABLE_DATABASE_ENVIRONMENT_CHECK
-1
-Hardcoded
-Bypasses safety checks to allow database migrations in production.
+---
 
+## 7. Security Best Practices Implemented
 
-7. Security wise Implementation
-Security was configured across the infrastructure to comply with industry standards:
-No Plaintext Credentials: Local secrets are isolated in terraform.tfvars, which is git-ignored. Codebase AWS keys are stored in encrypted GitHub Secrets.
-Role-Based AWS Permissions: The Rails app connects to S3 using an IAM task role instead of hardcoding static credentials in the environment variables.
-Private Subnet Isolation: Compute tasks and the RDS instance are running in private subnets, meaning they do not possess public IP addresses and cannot be reached directly from the internet.
-Layered Security Groups: Inbound rules are restricted so that only the ALB can access the ECS tasks, and only the ECS tasks can access the RDS database.
-Data Encryption: The RDS instance's storage volume is encrypted at rest using KMS, and the S3 bucket enforces AES256 server-side encryption.
-S3 Public Access Blocked: The S3 bucket blocks all public access
-ECR Vulnerability Scanning: ECR is configured to scan Docker images on push to locate security vulnerabilities.
-Centralized Logging: Logs from all containers are automatically sent to CloudWatch Logs with a 30-day retention period.
-Immutable Deployments: Fargate container tasks have SSH disabled. Updates are applied only by deploying new images.
-8. CI/CD Pipeline
-my GitHub Actions workflow is triggered on pushes to the 'main' branch or manually via 'workflow_dispatch'. The workflow steps are structured as follows:
-Step
-Action
-Description
-1
-Checkout Code
-Retrieves the repository files.
-2
-Configure AWS Credentials
-Authenticates to AWS using GitHub repository secrets.
-3
-Log in to Amazon ECR
-Authenticates the local runner's Docker client with the ECR registry.
-4
-Build & Push Rails Image
-Copies the ECS entrypoint script over the dev entrypoint, builds the Rails image, tags it, and pushes it to ECR.
-5
-Build & Push Nginx Image
-Copies the ECS Nginx configuration, builds the Nginx image, tags it, and pushes it to ECR.
-6
-Force ECS Deployment
-Runs 'aws ecs update-service' with the force redeployment flag to update the Fargate tasks with the new images.
+| # | Practice | Implementation |
+|---|----------|---------------|
+| 1 | **No hardcoded credentials** | AWS keys in GitHub Secrets; RDS password in `.tfvars` (`.gitignore` ignored) |
+| 2 | **IAM roles for S3** | ECS task role with S3 policy — no AccessKey/SecretKey in env vars |
+| 3 | **Private subnets** | ECS tasks and RDS are in private subnets, no public IPs |
+| 4 | **Least privilege SGs** | Chain: Internet → ALB → ECS → RDS (each only allows traffic from previous layer) |
+| 5 | **RDS encryption** | Storage encrypted at rest |
+| 6 | **S3 public access blocked** | All public ACLs and bucket policies blocked |
+| 7 | **ECR image scanning** | Automatic vulnerability scanning on push |
+| 8 | **CloudWatch logging** | All container logs captured with 30-day retention |
+| 9 | **No secrets in repo** | `.tfvars`, `.terraform/`, `*.tfstate` in `.gitignore` |
+| 10 | **No SSH access** | Fargate tasks have no SSH access (immutable infrastructure) |
 
+---
 
-Deployment Architecture Flow
-Code Push to main branch
+## 8. CI/CD Pipeline
+
+### GitHub Actions Workflow
+
+**Trigger**: Push to `main` branch or manual `workflow_dispatch`
+
+**Pipeline Steps:**
+
+```yaml
+name: Build and Deploy to ECS
+on:
+  push:
+    branches: [main]
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build & push Rails image
+        run: |
+          cp docker/app/entrypoint-ecs.sh docker/app/entrypoint.sh
+          docker build -f docker/app/Dockerfile -t $ECR_REPO:latest .
+          docker push $ECR_REPO --all-tags
+      - name: Build & push Nginx image
+        run: |
+          cp docker/nginx/ecs-default.conf docker/nginx/default.conf
+          docker build -f docker/nginx/Dockerfile -t $ECR_REPO:latest .
+          docker push $ECR_REPO --all-tags
+      - name: Force ECS deployment
+        run: |
+          aws ecs update-service --cluster ror-app-production-cluster \
+            --service ror-app-production-service --force-new-deployment
+```
+
+### Deployment Flow
+
+```
+Code Push (main)
       │
       ▼
-GitHub Actions Pipeline Triggered
-      ├──► Clones repository files
-      ├──► Authenticates with AWS using Secrets
-      ├──► Logs into ECR Registry
-      ├──► Builds & Pushes Rails Container (with entrypoint-ecs.sh)
-      ├──► Builds & Pushes Nginx Container (with ecs-default.conf)
-      └──► Forces ECS Service rolling update
+GitHub Actions triggered
+      │
+      ├──► Checkout code
+      ├──► Configure AWS credentials (GitHub Secrets)
+      ├──► Login to Amazon ECR
+      ├──► Build Rails Docker image (with ECS entrypoint)
+      ├──► Build Nginx Docker image (with ECS nginx config)
+      ├──► Push both images to ECR (latest + commit SHA tags)
+      └──► Force ECS service update (rolling deployment)
                │
                ▼
-        ECS service spins up new Fargate tasks
-        (pulls latest container images)
+        ECS Service starts new tasks
+        (pulls new images from ECR)
                │
                ▼
-        ALB target group health checks pass
+        ALB health check passes
                │
                ▼
-        Old tasks are drained and replaced
+        Old tasks drained, new tasks serve traffic
+```
 
+---
 
-9. Issue faced and Troubleshooting 
-During deployment, I resolved several configuration challenges:
-Issue 1: Container Pull Error (CannotPullContainerError)
-Symptom: The ECS tasks failed to start, returning a pull manifest retry timeout error.
-Root Cause: The ECS service was created before the build pipeline had pushed container images to the ECR repositories, leaving the repositories empty.
-Resolution: I configured the AWS secrets in the repository and pushed the codebase to trigger the CI/CD pipeline, building and pushing the images before ECS pulled them.
-Issue 2: ActiveRecord Protected Environment Error
-Symptom: The Rails application crashed during start, throwing a ProtectedEnvironmentError.
-Root Cause: The original entrypoint script ran 'rails db:schema:load', which drops the database. Rails protects against destructive commands in production.
-Resolution: I added the DISABLE_DATABASE_ENVIRONMENT_CHECK=1 environment variable to the task definition to disable this protection.
-Issue 3: Blocked Host Request Errors
-Symptom: Connections through the load balancer failed with a Blocked Hosts warning.
-Root Cause: Rails' HostAuthorization middleware rejected connections because the ALB health checks hit the tasks using private IPs rather than the configured domain name.
-Resolution: I added config.hosts << /.*/ to config/environments/production.rb, allowing Rails to accept requests routed to any IP address.
-Issue 4: Destructive Startup Database Setup
-Symptom: Every container restart caused database data loss.
-Root Cause: The default entrypoint executed db:schema:load on startup, which dropped and rebuilt the database tables on every launch.
-Resolution: I created docker/app/entrypoint-ecs.sh, which uses rails db:prepare instead of db:schema:load. This safely migrates the database only if migrations are pending, protecting data across task restarts.
-Issue 5: Missing PostgreSQL Version on RDS
-Symptom: Terraform failed, stating PostgreSQL version 13.3 was not available.
-Root Cause: PostgreSQL 13.3 reached EOL in November 2025, and AWS has disabled provisioning of new instances on that version.
-Resolution: I updated the database version to PostgreSQL 18.3 in rds.tf, 
+## 9. Troubleshooting & Issues Resolved
 
-Issue 6: Task Definition Dependency Health Checks
-Symptom: The Fargate task definition failed registration.
-Root Cause: The Nginx container definition declared a startup dependency on the rails_app container being 'HEALTHY', but rails_app did not have a health check block configured.
-Resolution: I added a health check definition to the rails_app container block in ecs.tf using a curl command against http://localhost:3000.
-10. Verifying & Accessing the Application
-Public Access
-The application is publicly accessible at the load balancer endpoint:
+### Issue 1: CannotPullContainerError
+
+**Symptom**: ECS tasks failing with `CannotPullContainerError: pull image manifest has been retried 7 time(s): not found`
+
+**Root cause**: ECR repositories were empty. The Terraform created the ECR repos but no Docker images had been pushed yet. The ECS service was created with `desired_count=2` and immediately tried to pull images that didn't exist.
+
+**Fix**: Configured GitHub Secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) and pushed code to trigger the CI/CD pipeline. The pipeline builds Docker images and pushes them to ECR, then forces an ECS service update.
+
+### Issue 2: ActiveRecord::ProtectedEnvironmentError
+
+**Symptom**: Rails app crashes with `ActiveRecord::ProtectedEnvironmentError: You are attempting to run a destructive action against your 'production' database`
+
+**Root cause**: The app's `entrypoint.sh` runs `bundle exec rails db:schema:load` which drops and recreates the database. Rails 7 protects against this in production by raising `ProtectedEnvironmentError`.
+
+**Fix**: Added environment variable `DISABLE_DATABASE_ENVIRONMENT_CHECK=1` to the ECS task definition. This bypasses the production environment check and allows `db:schema:load` to run.
+
+### Issue 3: Blocked Hosts
+
+**Symptom**: `[ActionDispatch::HostAuthorization::DefaultResponseApp] Blocked hosts: localhost:3000`
+
+**Root cause**: Rails 7's `HostAuthorization` middleware rejects requests with unrecognized Host headers. When the ALB health check hits nginx (which proxies to Rails), the Host header is the ALB's private IP, which isn't in Rails' allowed hosts list.
+
+**Fix**: Modified `config/environments/production.rb` to add `config.hosts << /.*/` which allows all hosts. The app already had `config.hosts << "#{ENV['LB_ENDPOINT']}"` for legitimate traffic, but health checks needed a broader rule.
+
+### Issue 4: Destructive db:schema:load on every restart
+
+**Symptom**: Every container restart would drop and recreate the database, losing all data.
+
+**Root cause**: The original `entrypoint.sh` runs `db:create`, `db:schema:load`, and `db:migrate` on every startup. `db:schema:load` uses `db:reset` under the hood which drops the database.
+
+**Fix**: Created `docker/app/entrypoint-ecs.sh` which uses `bundle exec rails db:prepare` instead. `db:prepare` creates the database if it doesn't exist and runs pending migrations — it's idempotent and safe for repeated runs.
+
+### Issue 5: RDS Engine Version Not Available
+
+**Symptom**: `Cannot find version 13.3 for postgres`
+
+**Root cause**: PostgreSQL 13 reached End of Life (EOL) in November 2025. As of July 2026, AWS no longer supports creating new RDS instances with PostgreSQL 13.
+
+**Fix**: Updated to PostgreSQL 18.3 (the latest available version in us-east-2). The `rds.tf` now uses a data source `aws_rds_engine_version` to dynamically select the latest available PostgreSQL 18.x version.
+
+### Issue 6: ECS Health Check Dependency
+
+**Symptom**: `A dependency container with HEALTHY condition must have health check configured`
+
+**Root cause**: The nginx container had `dependsOn: [{ condition: "HEALTHY", containerName: "rails_app" }]` but the rails_app container didn't have a health check defined.
+
+**Fix**: Added a health check to the rails_app container definition using `CMD-SHELL curl -f http://localhost:3000/ || exit 1` with appropriate interval, timeout, and retry settings.
+
+---
+
+## 10. How to Access the Application
+
+### From Browser
+```
 http://ror-app-production-alb-1408939335.us-east-2.elb.amazonaws.com
+```
 
+### From AWS Management Console
+1. Go to **EC2 → Load Balancers**
+2. Select `ror-app-production-alb`
+3. Copy the **DNS name** from the description tab
 
+### Verify ECS Tasks
+```bash
+aws ecs describe-services \
+  --cluster ror-app-production-cluster \
+  --service ror-app-production-service \
+  --query "services[0].{tasks:runningCount, desired:desiredCount}"
+```
 
-Task Status Check
+### Check Application Logs
+```bash
+# Rails app logs
+aws logs tail /ecs/ror-app-production-rails-app --follow
 
-Accessing Logs on cloud trail
+# Nginx logs
+aws logs tail /ecs/ror-app-production-nginx --follow
+```
 
-12. Resource Cleanup
-I have destroy all deployed resources and prevent ongoing AWS charges, 
+---
+
+## 11. Cost Breakdown
+
+| Service | Configuration | Estimated Monthly Cost |
+|---------|--------------|----------------------|
+| **VPC** | 1 NAT Gateway + 1 Elastic IP | ~$35.00 |
+| **ALB** | 1 ALB, simple rules, no data | ~$22.00 |
+| **ECS Fargate** | 2 tasks × 0.5 vCPU × 1GB RAM, always on | ~$30.00 |
+| **RDS PostgreSQL** | db.t3.micro, 20GB gp2, single-AZ | ~$17.00 |
+| **S3** | Minimal storage (< 1GB) | ~$1.00 |
+| **ECR** | 2 repos, minimal image storage | ~$1.00 |
+| **CloudWatch Logs** | Log ingestion & storage | ~$3.00 |
+| **TOTAL** | | **~$109.00/month** |
+
+---
+
+## 12. Clean Up
+
+To destroy all infrastructure and avoid ongoing costs:
+
+```bash
 cd infrastructure/terraform
-terraform destroy
+terraform destroy  
+```
 
+This will delete all resources: VPC, subnets, NAT Gateway, EIP, security groups, IAM roles, ECR repos, RDS instance, S3 bucket, ALB, ECS cluster, and CloudWatch log groups.
 
+---
+
+## Appendix A: Repository Structure
+
+```
+DevOps-Interview-ROR-App/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml              # CI/CD pipeline (GitHub Actions)
+├── app/                             # Rails application source
+├── config/
+│   ├── environments/
+│   │   └── production.rb            # Modified: added config.hosts wildcard
+│   └── ...
+├── docker/
+│   ├── app/
+│   │   ├── Dockerfile              # Rails app container build
+│   │   ├── entrypoint.sh           # Original entrypoint (local dev)
+│   │   └── entrypoint-ecs.sh       # ECS-specific entrypoint (db:prepare)
+│   └── nginx/
+│       ├── Dockerfile              # Nginx container build
+│       ├── default.conf            # Local dev nginx config
+│       └── ecs-default.conf        # ECS nginx config (localhost:3000)
+├── infrastructure/
+│   ├── terraform/                   # All Terraform IaC code (12 .tf files)
+│   ├── diagrams/
+│   │   └── architecture.md        # Mermaid + ASCII architecture diagram
+│   ├── DEPLOYMENT_REPORT.md        # This document
+│   └── README.md                   # Quick-start deployment guide
+├── docker-compose.yml              # Local development
+├── rails_app.env                   # Environment file (local)
+└── (other Rails application files)
+```
+
+## Appendix B: Terraform File Summary
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `provider.tf` | 15 | AWS provider configuration |
+| `variables.tf` | 100+ | All input variables with descriptions and defaults |
+| `outputs.tf` | 40+ | Output values for easy reference |
+| `vpc.tf` | 110+ | VPC, subnets, IGW, NAT Gateway, route tables |
+| `security_groups.tf` | 90+ | Security groups for ALB, ECS, RDS |
+| `iam.tf` | 85+ | IAM roles, policies, and attachments |
+| `ecr.tf` | 25+ | ECR repositories with image scanning |
+| `rds.tf` | 55+ | RDS PostgreSQL with parameter group and subnet group |
+| `s3.tf` | 45+ | S3 bucket with encryption and public access block |
+| `alb.tf` | 40+ | ALB, target group, and HTTP listener |
+| `ecs.tf` | 150+ | ECS cluster, capacity providers, task definition, service, log groups |
+
+---
+
+*End of Deployment Report*
