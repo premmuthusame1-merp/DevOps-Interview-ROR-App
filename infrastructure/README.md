@@ -1,5 +1,5 @@
 # Deployment Report
-
+Complete Report with steps with the applications screenshots have attached in the file AWS_ECS_Fargate_Deployment_Report (1) 
 ## Project: Ruby on Rails Web Application on AWS ECS Fargate
 
 ### Prepared by: premmuthusame-merp
@@ -7,6 +7,7 @@
 ### Repository: https://github.com/premmuthusame1-merp/DevOps-Interview-ROR-App
 ### IaC Tool: Terraform
 ### AWS Region: us-east-2
+
 
 ---
 
